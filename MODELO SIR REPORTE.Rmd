@@ -1,0 +1,154 @@
+---
+title: "MODELO SIR COVID19 ECUADOR"
+author: "Rodrigo Peña,@rodri_pr20"
+date: "28 de abril de 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Obtención de la Información
+
+La información ha sido utilizada del repositorio de [RAMIKRISPING](https://github.com/RamiKrispin) del paquete "coronavirus" obtenido de la data generada por la Universidad Johns Hopkings.
+
+## Librerías utilizadas
+```{r,message=FALSE}
+#install.packages("deSolve")
+#install.packages("tidyverse")
+
+library(knitr)
+library(deSolve)
+library(tidyverse)
+library(usethis)
+library(devtools)
+library(dplyr)
+
+```
+
+## Carga de datos
+```{r}
+# devtools::install_github("RamiKrispin/coronavirus", force = T)
+library(coronavirus)
+COVID19 <- data.frame(coronavirus) 
+
+```
+
+
+## Proceso de simulación del modelo SIR
+```{r}
+c1 <- COVID19 %>% 
+  select (date, type, cases)%>% 
+  group_by (date, type)%>% 
+  summarise (total_cases = sum (cases))
+
+c2 <- c1[which(c1$type=="confirmed" & c1$date != "2020-02-13"   ),]
+
+c2$cumtotal_cases <- cumsum(c2$total_cases) 
+
+ggplot(data= c2 ,aes(date,cumtotal_cases, colour = type)) + geom_line()
+
+
+pop <-17000000
+
+Infected <- as.integer(c2$cumtotal_cases)
+
+Dia <- 1:length(Infected)
+
+SIR <- function(time, state, parameters) { 
+  par <- as.list(c(state, parameters))
+  with(par, {
+    dS <- -beta/pop * I * S
+    dI <- beta/pop * I * S - gamma * I
+    dR <- gamma * I
+    list(c(dS, dI, dR))
+  })
+}
+
+
+
+
+init <- c (S = pop-Infected [1], I = Infected [1], R = 0) 
+
+RSS <- function(parameters) {
+  names(parameters) <- c("beta", "gamma")
+  out <- ode(y = init, times = Dia, func = SIR, parms = parameters)
+  fit <- out[ , 3]
+  sum((Infected - fit)^2)
+}
+
+Opt <- optim(c(0.5, 0.5), RSS, method = "L-BFGS-B", lower = c(0, 0), upper = c(1, 1)) # optimize with some sensible conditions
+Opt_par <- setNames(Opt$par, c("beta", "gamma"))
+Opt_par
+
+
+
+t <- 1:200 # time in days
+fit <- data.frame(ode(y = init, times = t, func = SIR, parms = Opt_par))
+
+
+R0 <- setNames(Opt_par["beta"] / Opt_par["gamma"], "R0")
+Height <- fit[fit$I == max(fit$I), "I", drop = FALSE] # height of pandemic
+Max_Dead <- max(fit$I) * 0.028 # max deaths with supposed 2% mortality rate
+R0 
+Height 
+Max_Dead 
+
+```
+
+## Gráfico del modelo 
+```{r,echo=FALSE}
+
+graph11 <- fit %>% gather(key, value, -time)
+bigplot <- ggplot(graph11, mapping = aes(x = time, y = value, color = key) ) +   
+  geom_line(size =1.2)+  
+  scale_color_manual( values = 
+                        c("red1", "green3","gray1"))+ 
+  
+  theme(
+    plot.title = element_text(size = 12, face = "bold",hjust = 0.5),
+    plot.caption = element_text(size = 8, face = "italic"),
+    legend.position="top",
+    legend.title = element_blank(),
+    legend.box = "horizontal" ,
+    legend.text=element_text(size=8.5),
+    panel.grid.minor = element_blank(), 
+    panel.grid.major = element_line(color = "gray50", size = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.background = element_blank(),
+    line = element_blank(),
+    axis.ticks.length = unit(.15, "cm"),
+    axis.ticks.y = element_blank(),
+    axis.title.x = element_text(color="black", 
+                                size=12),
+    axis.title.y = element_text(color="black",
+                                size=10,
+                                face="italic"))+
+  
+  scale_y_continuous(expand = c(0, 0),
+                     limits=c(0.0,50000000),
+                     breaks=seq(0.0,50000000,10000000), 
+                     name = "Number of subjects")+
+  
+  scale_x_continuous(expand = c(0, 0),
+                     name = "Days")+
+  
+  labs(title = "SIR Model 2019-nCov ECUADOR", 
+       caption = "Info taken from RamiKrispin. Adapted model from Learning Machines.")
+
+bigplot
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
